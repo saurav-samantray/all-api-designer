@@ -1,3 +1,4 @@
+const jsonPointer = require('json-pointer');
 const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose'); // Added for ObjectId.isValid
@@ -355,6 +356,162 @@ async function readDirectoryRecursive(dirPath, relativePath = '') {
   });
 }
 // GET /api/projects/:projectId/files - List files and directories in a project
+
+
+// GET /api/projects/:projectId - Get a single project by its ID
+
+
+// GET /api/projects/:projectId/resolve-ref?path=<currentFilePath>&ref=<referenceString>
+router.get('/:projectId/resolve-ref', async (req, res, next) => {
+  try {
+    const { projectId } = req.params;
+    const { path: currentFilePathQuery, ref: referenceString } = req.query;
+
+    if (!mongoose.Types.ObjectId.isValid(projectId)) {
+      return res.status(400).json({ message: 'Invalid Project ID format.' });
+    }
+    if (!currentFilePathQuery) {
+      return res.status(400).json({ message: 'Query parameter "path" (current file path) is required.' });
+    }
+    if (!referenceString) {
+      return res.status(400).json({ message: 'Query parameter "ref" (reference string) is required.' });
+    }
+
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({ message: 'Project not found.' });
+    }
+    if (!project.projectPath) {
+      return res.status(500).json({ message: 'Project path not defined.' });
+    }
+
+    const resolvedProjectPath = path.resolve(project.projectPath);
+    const currentFileAbsolutePath = path.resolve(resolvedProjectPath, currentFilePathQuery);
+
+    // Security check for currentFilePathQuery
+    if (!currentFileAbsolutePath.startsWith(resolvedProjectPath + path.sep) && currentFileAbsolutePath !== resolvedProjectPath) {
+        return res.status(403).json({ message: 'Access denied: Current file path is outside project boundaries.' });
+    }
+    try {
+        const stats = await fs.stat(currentFileAbsolutePath);
+        if(stats.isDirectory()){
+            return res.status(400).json({ message: 'Current path points to a directory, not a file.' });
+        }
+    } catch (e) {
+        if (e.code === 'ENOENT') {
+            return res.status(404).json({ message: 'Current file path not found.' });
+        }
+        throw e; // Re-throw other stat errors
+    }
+
+
+    let targetFilePath = currentFileAbsolutePath;
+    let pointer = '';
+
+    if (referenceString.startsWith('#/')) {
+      // Internal reference within the current file
+      pointer = referenceString;
+    } else if (referenceString.includes('#/')) {
+      // External file with an internal pointer
+      const [externalPath, internalPointer] = referenceString.split('#');
+      pointer = '#' + internalPointer; // Pointer must start with #
+      const currentFileDir = path.dirname(currentFileAbsolutePath);
+      targetFilePath = path.resolve(currentFileDir, externalPath);
+    } else {
+      // Reference to an entire external file
+      const currentFileDir = path.dirname(currentFileAbsolutePath);
+      targetFilePath = path.resolve(currentFileDir, referenceString);
+    }
+
+    // Security check for targetFilePath (if it's different from currentFileAbsolutePath)
+    if (targetFilePath !== currentFileAbsolutePath &&
+        !targetFilePath.startsWith(resolvedProjectPath + path.sep) &&
+        targetFilePath !== resolvedProjectPath) {
+      return res.status(403).json({ message: 'Access denied: Reference path is outside project boundaries.' });
+    }
+
+    let fileContent;
+    try {
+      fileContent = await fs.readFile(targetFilePath, 'utf-8');
+    } catch (e) {
+      if (e.code === 'ENOENT') {
+        return res.status(404).json({ message: `Referenced file not found: ${path.basename(targetFilePath)}` });
+      }
+      throw e; // Re-throw other readFile errors
+    }
+
+    const extension = fileUtils.getFileExtension(targetFilePath);
+    let parsedContent;
+    try {
+      // Using fileUtils.parseFileContent which encapsulates yaml.load and JSON.parse
+      parsedContent = fileUtils.parseFileContent(fileContent, extension);
+      if (parsedContent === null && fileContent.trim() !== '') { // parseFileContent returns null on error or for non-json/yaml
+         if (extension === '.json' || extension === '.yaml' || extension === '.yml') {
+            return res.status(500).json({ message: `Error parsing referenced file '${path.basename(targetFilePath)}'. Content may be malformed.` });
+         }
+         // If it's not a JSON/YAML file, we can't use jsonPointer. If a pointer was provided, this is an issue.
+         if (pointer) {
+            return res.status(400).json({ message: `Cannot resolve pointer in non-JSON/YAML file type: ${extension}` });
+         }
+         // If no pointer, and not JSON/YAML, just return raw content for other file types (e.g. plain text)
+         // However, the endpoint is designed for JSON/YAML , so this case might be an error or needs clarification.
+         // For now, let's assume  targets are always JSON/YAML.
+         return res.status(400).json({ message: `Unsupported file type for $ref resolution: ${extension}` });
+      }
+       if (parsedContent === null && fileContent.trim() === '' && (extension === '.json' || extension === '.yaml' || extension === '.yml')) {
+        // If the file is empty but valid (e.g. empty JSON object or empty YAML), parsedContent might be {} or null.
+        // jsonPointer.has would correctly say pointer not found for most pointers.
+        // If pointer is empty or /, it might resolve to the empty object.
+        parsedContent = (extension === '.json') ? {} : null; // Or an empty object for YAML too if appropriate
+      }
+    } catch (e) { // This catch is for fileUtils.parseFileContent if it somehow throws despite internal try-catch
+      return res.status(500).json({ message: `Error parsing referenced file '${path.basename(targetFilePath)}': ${e.message}` });
+    }
+
+    if (pointer) {
+      try {
+        const actualJsonPointer = pointer.substring(1);
+        if (!jsonPointer.has(parsedContent, actualJsonPointer)) {
+            return res.status(404).json({ message: `JSON Pointer '${pointer}' not found in referenced file '${path.basename(targetFilePath)}'.` });
+        }
+        const resolvedData = jsonPointer.get(parsedContent, actualJsonPointer);
+        return res.status(200).json(resolvedData);
+      } catch (e) {
+        // This can happen if parsedContent is null (e.g. empty YAML) and pointer is not empty
+        return res.status(500).json({ message: `Error resolving JSON Pointer '${pointer}' in '${path.basename(targetFilePath)}': ${e.message}` });
+      }
+    } else {
+      // No pointer, return the whole parsed content of the referenced file
+      return res.status(200).json(parsedContent);
+    }
+
+  } catch (error) {
+    console.error('Error resolving reference:', error);
+    next(error);
+  }
+});
+
+router.get('/:projectId', async (req, res, next) => {
+  try {
+    const { projectId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(projectId)) {
+      return res.status(400).json({ message: 'Invalid Project ID format.' });
+    }
+
+    const project = await Project.findById(projectId);
+
+    if (!project) {
+      return res.status(404).json({ message: 'Project not found.' });
+    }
+
+    res.status(200).json(project);
+  } catch (error) {
+    console.error('Error fetching project by ID:', error);
+    next(error); // Pass to centralized error handler
+  }
+});
+
 router.get('/:projectId/files', async (req, res, next) => {
   try {
     const { projectId } = req.params;

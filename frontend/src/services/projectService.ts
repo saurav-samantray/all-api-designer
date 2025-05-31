@@ -113,3 +113,50 @@ export async function updateFileContent(projectId: string, filePath: string, con
     throw error;
   }
 }
+
+/**
+ * Fetches a single project by its ID from the backend.
+ * @param projectId - The ID of the project.
+ * @returns A promise that resolves to the Project object.
+ */
+export async function getProjectById(projectId: string): Promise<Project> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}`);
+    // handleResponse will throw for non-ok responses, so if project is not found (404), it becomes an error.
+    return await handleResponse<Project>(response);
+  } catch (error) {
+    console.error(`Failed to get project by ID ${projectId}:`, error);
+    // Re-throw to be caught by the calling component
+    throw error;
+  }
+}
+
+/**
+ * Resolves a $ref string using the backend service.
+ * @param projectId - The ID of the project.
+ * @param currentFilePath - The path of the file containing the $ref, relative to the project root.
+ * @param refString - The $ref string (e.g., '#/components/schemas/User', '../models/User.yaml').
+ * @returns A promise that resolves to the parsed JSON content of the resolved reference.
+ */
+export async function resolveProjectReference(
+  projectId: string,
+  currentFilePath: string,
+  refString: string
+): Promise<any> {
+  try {
+    const params = new URLSearchParams({
+      path: currentFilePath,
+      ref: refString,
+    });
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/resolve-ref?${params.toString()}`);
+    // handleResponse is designed to parse JSON, which is what the backend /resolve-ref endpoint returns.
+    return await handleResponse<any>(response);
+  } catch (error) {
+    console.error(
+      `Failed to resolve reference "${refString}" in file "${currentFilePath}" for project ${projectId}:`,
+      error
+    );
+    // Re-throw the error so UI components can handle it and display appropriate messages
+    throw error;
+  }
+}

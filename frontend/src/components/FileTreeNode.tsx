@@ -2,34 +2,60 @@
 
 import { FileEntry } from '@/types/project';
 import { useState } from 'react';
-// Placeholder for icons (e.g., from react-icons)
-// import { FaFolder, FaFolderOpen, FaFileAlt, FaFileCode, FaFileImage } from 'react-icons/fa';
+import {
+  Folder,
+  FolderOpen,
+  File,
+  FileJson,
+  FileCode, // Generic for code-like, can be for YAML too
+  FileText, // Default for other files
+  FileQuestion // For unknown or malformed
+} from 'lucide-react';
 
 interface FileTreeNodeProps {
   node: FileEntry;
-  onFileSelect: (file: FileEntry) => void; // Callback when a file is selected
+  onFileSelect: (file: FileEntry) => void;
+  // Add indent level for potentially better visual styling of nested items if needed later
+  // indentLevel?: number;
 }
 
-// Basic icon determination based on type and extension
 const getIcon = (node: FileEntry, isOpen?: boolean) => {
+  const iconSize = 16; // Consistent icon size
+  const iconClassName = "inline-block mr-2 flex-shrink-0";
+
   if (node.type === 'directory') {
-    return isOpen ? '[D+]' : '[D-]'; // Simple text icons
-    // return isOpen ? <FaFolderOpen /> : <FaFolder />;
+    return isOpen
+      ? <FolderOpen size={iconSize} className={iconClassName} />
+      : <Folder size={iconSize} className={iconClassName} />;
   }
-  // Basic file type icons based on specInfo or extension
-  if (node.specInfo?.isSpec) {
-    if (node.specInfo.type === 'openapi') return '[OAPI]';
-    if (node.specInfo.type === 'asyncapi') return '[AAPI]';
-    if (node.specInfo.type === 'json_schema') return '[JSONS]';
+
+  const specType = node.specInfo?.type;
+  const isValid = node.specInfo?.isValid;
+
+  if (!isValid && specType?.includes('_malformed')) {
+    return <FileQuestion size={iconSize} className={\`\${iconClassName} text-red-500\`} title="Malformed file" />;
   }
-  if (node.extension === '.json') return '[JSON]';
-  if (node.extension === '.yaml' || node.extension === '.yml') return '[YAML]';
-  return '[File]';
-  // return <FaFileAlt />;
+  if (!isValid && specType?.includes('_error')) {
+    return <FileQuestion size={iconSize} className={\`\${iconClassName} text-orange-500\`} title="Error processing file" />;
+  }
+
+  if (specType === 'openapi') return <FileCode size={iconSize} className={\`\${iconClassName} text-green-600\`} title="OpenAPI Spec" />;
+  if (specType === 'asyncapi') return <FileCode size={iconSize} className={\`\${iconClassName} text-purple-600\`} title="AsyncAPI Spec" />;
+  if (specType === 'json_schema') return <FileJson size={iconSize} className={\`\${iconClassName} text-blue-600\`} title="JSON Schema" />;
+
+  // More specific based on extension if not a known spec type from specInfo.type
+  if (node.extension === '.json') return <FileJson size={iconSize} className={iconClassName} title="JSON File" />;
+  if (node.extension === '.yaml' || node.extension === '.yml') return <FileCode size={iconSize} className={iconClassName} title="YAML File" />; // FileCode can represent generic code/structured text
+  if (node.extension === '.xml') return <FileCode size={iconSize} className={iconClassName} title="XML File" />;
+  if (node.extension === '.md') return <FileText size={iconSize} className={iconClassName} title="Markdown File" />;
+  if (node.extension === '.txt') return <FileText size={iconSize} className={iconClassName} title="Text File" />;
+
+  return <File size={iconSize} className={iconClassName} title="File" />; // Default file icon
 };
 
 export default function FileTreeNode({ node, onFileSelect }: FileTreeNodeProps) {
   const [isOpen, setIsOpen] = useState(false);
+  // const currentIndent = indentLevel || 0;
 
   const handleToggle = () => {
     if (node.type === 'directory') {
@@ -37,32 +63,37 @@ export default function FileTreeNode({ node, onFileSelect }: FileTreeNodeProps) 
     }
   };
 
-  const handleFileClick = () => {
+  const handleNodeClick = () => {
     if (node.type === 'file') {
       onFileSelect(node);
-    } else {
-      // Optionally toggle directory on name click as well
+    } else { // Directory
       handleToggle();
     }
   };
 
   return (
-    <div className="ml-4 my-1">
+    <div className="my-0.5"> {/* Reduced margin for tighter packing if desired */}
       <div
-        onClick={node.type === 'directory' ? handleToggle : handleFileClick}
-        className={\`flex items-center cursor-pointer p-1 rounded hover:bg-gray-200 \${node.type === 'file' ? 'text-blue-600 hover:underline' : 'text-gray-700'}\`}
+        onClick={handleNodeClick}
+        className={\`flex items-center cursor-pointer p-1.5 rounded hover:bg-gray-100 \${node.type === 'file' ? 'text-gray-700 hover:text-blue-700' : 'text-gray-800'}\`}
         title={node.path}
+        // style={{ paddingLeft: \`\${currentIndent * 16}px\` }} // Optional: if using indentLevel prop
       >
-        <span className="mr-2 w-6 text-center">{getIcon(node, isOpen)}</span>
-        <span>{node.name}</span>
+        {getIcon(node, isOpen)}
+        <span className="truncate text-sm">{node.name}</span>
         {node.type === 'directory' && node.children && node.children.length === 0 && (
-          <span className="ml-2 text-xs text-gray-400">(empty)</span>
+          <span className="ml-2 text-xs text-gray-400 italic">(empty)</span>
         )}
       </div>
       {node.type === 'directory' && isOpen && node.children && node.children.length > 0 && (
-        <div className="ml-4 border-l border-gray-300 pl-2">
+        <div className="ml-4 pl-2 border-l border-gray-300"> {/* Indentation for children */}
           {node.children.map((childNode) => (
-            <FileTreeNode key={childNode.path} node={childNode} onFileSelect={onFileSelect} />
+            <FileTreeNode
+              key={childNode.path}
+              node={childNode}
+              onFileSelect={onFileSelect}
+              // indentLevel={currentIndent + 1} // Optional
+            />
           ))}
         </div>
       )}
