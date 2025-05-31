@@ -1,4 +1,4 @@
-import { Project, ProjectCreationData } from '@/types/project';
+import { Project, ProjectCreationData, FileEntry } from '@/types/project';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
@@ -45,6 +45,71 @@ export async function createProject(projectData: ProjectCreationData): Promise<P
   } catch (error) {
     console.error('Failed to create project:', error);
     // Re-throw the error so UI components can handle it
+    throw error;
+  }
+}
+
+/**
+ * Fetches the file and directory tree for a specific project.
+ * @param projectId - The ID of the project.
+ * @returns A promise that resolves to an array of FileEntry objects.
+ */
+export async function getProjectFiles(projectId: string): Promise<FileEntry[]> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/files`);
+    return await handleResponse<FileEntry[]>(response);
+  } catch (error) {
+    console.error(`Failed to get files for project ${projectId}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Fetches the content of a specific file within a project.
+ * @param projectId - The ID of the project.
+ * @param filePath - The relative path of the file within the project.
+ * @returns A promise that resolves to the raw string content of the file.
+ */
+export async function getFileContent(projectId: string, filePath: string): Promise<string> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/files/content?path=${encodeURIComponent(filePath)}`);
+    if (!response.ok) {
+      // Try to parse JSON error, but fallback to statusText if not possible or if response is not JSON
+      let errorPayload;
+      try {
+        errorPayload = await response.json();
+      } catch (e) {
+        errorPayload = { message: response.statusText };
+      }
+      console.error('API Error fetching file content:', errorPayload);
+      throw new Error(errorPayload.message || 'An error occurred while fetching file content.');
+    }
+    return await response.text(); // Expecting raw text or stringified JSON/YAML
+  } catch (error) {
+    console.error(`Failed to get content for file ${filePath} in project ${projectId}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Updates the content of a specific file within a project.
+ * @param projectId - The ID of the project.
+ * @param filePath - The relative path of the file within the project.
+ * @param content - The new content for the file (can be a string or an object for JSON/YAML files that backend stringifies/dumps).
+ * @returns A promise that resolves to the backend's success response.
+ */
+export async function updateFileContent(projectId: string, filePath: string, content: string | object): Promise<any> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/files/content?path=${encodeURIComponent(filePath)}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json', // Body is always JSON { content: ... }
+      },
+      body: JSON.stringify({ content: content }), // Backend expects { content: ... }
+    });
+    return await handleResponse<any>(response); // Expecting a JSON response like { message: ... }
+  } catch (error) {
+    console.error(`Failed to update content for file ${filePath} in project ${projectId}:`, error);
     throw error;
   }
 }

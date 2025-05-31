@@ -18,3 +18,26 @@ export interface ProjectCreationData {
   description?: string;
   gitUrl?: string;
 }
+
+
+
+// Information about the identified specification of a file
+export interface SpecInfo {
+  type: string;       // e.g., 'openapi', 'asyncapi', 'json_schema', 'json', 'yaml', 'json_malformed', 'other'
+  version: string | null;
+  isValid: boolean;   // Was the file content parsable / does it conform to basic structure?
+  isSpec: boolean;    // Is it one of the recognized specific specifications (openapi, asyncapi, json_schema)?
+}
+
+// Represents a file or directory entry in a project's file tree
+export interface FileEntry {
+  name: string;
+  path: string;        // Relative path from the project root
+  type: 'file' | 'directory';
+  size?: number;       // For files
+  createdAt: string;   // ISO date string
+  lastModified: string; // ISO date string
+  extension?: string;  // For files, e.g., '.json', '.yaml'
+  specInfo?: SpecInfo; // For files, especially if they are specs
+  children?: FileEntry[]; // For directories, contains nested FileEntry objects
+}
